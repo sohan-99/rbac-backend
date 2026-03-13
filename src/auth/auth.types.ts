@@ -13,12 +13,25 @@ export type LoginRequest = {
   password: string;
 };
 
+export type SignupRequest = {
+  name: string;
+  email: string;
+  password: string;
+};
+
 export type AuthResponse = {
   success: boolean;
   message?: string;
   data: {
     accessToken: string;
-    refreshToken: string;
     user: AuthUser;
+  };
+};
+
+export type RefreshResponse = {
+  success: boolean;
+  message?: string;
+  data: {
+    accessToken: string;
   };
 };
