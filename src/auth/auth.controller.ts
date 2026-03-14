@@ -16,6 +16,25 @@ import type { LoginRequest, SignupRequest } from './auth.types';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  private getCookieBaseOptions() {
+    const configuredSameSite = (process.env.COOKIE_SAME_SITE ?? '').toLowerCase();
+    const resolvedSameSite =
+      configuredSameSite === 'lax' ||
+      configuredSameSite === 'strict' ||
+      configuredSameSite === 'none'
+        ? configuredSameSite
+        : process.env.NODE_ENV === 'production'
+          ? 'none'
+          : 'lax';
+
+    return {
+      httpOnly: true,
+      sameSite: resolvedSameSite as 'lax' | 'strict' | 'none',
+      secure: resolvedSameSite === 'none' ? true : process.env.NODE_ENV === 'production',
+      path: '/',
+    };
+  }
+
   private getClientIp(request: Request) {
     const forwardedFor = request.headers['x-forwarded-for'];
 
@@ -31,11 +50,10 @@ export class AuthController {
   }
 
   private setRefreshCookie(response: Response, refreshToken: string) {
+    const cookieOptions = this.getCookieBaseOptions();
+
     response.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }
@@ -85,12 +103,10 @@ export class AuthController {
   ) {
     const accessToken = authorization?.replace(/^Bearer\s+/i, '').trim() ?? '';
     const refreshToken = request.cookies?.refreshToken ?? '';
+    const cookieOptions = this.getCookieBaseOptions();
 
     response.clearCookie('refreshToken', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
+      ...cookieOptions,
     });
 
     return this.authService.logout(

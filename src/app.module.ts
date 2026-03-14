@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'fs';
+import { resolve } from 'path';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
@@ -13,15 +15,52 @@ import { User } from './users/user.entity';
 import { UserPermission } from './users/user-permission.entity';
 import { UsersModule } from './users/users.module';
 
+function loadEnvFile() {
+  const envPath = resolve(process.cwd(), '.env');
+  if (!existsSync(envPath)) {
+    return;
+  }
+
+  const content = readFileSync(envPath, 'utf8');
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+loadEnvFile();
+
+const databaseUrl = process.env.DATABASE_URL;
+const sslEnabled = process.env.DB_SSL === 'true';
+
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 5432),
-      username: process.env.DB_USER ?? 'postgres',
-      password: process.env.DB_PASSWORD ?? 'postgres',
-      database: process.env.DB_NAME ?? 'rbac_db',
+      ...(databaseUrl
+        ? { url: databaseUrl }
+        : {
+            host: process.env.DB_HOST ?? 'localhost',
+            port: Number(process.env.DB_PORT ?? 5432),
+            username: process.env.DB_USER ?? 'postgres',
+            password: process.env.DB_PASSWORD ?? 'postgres',
+            database: process.env.DB_NAME ?? 'rbac_db',
+          }),
+      ssl: sslEnabled ? { rejectUnauthorized: false } : false,
       entities: [
         User,
         Role,
