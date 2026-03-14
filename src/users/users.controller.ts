@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Headers,
   HttpCode,
@@ -12,7 +13,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { UserRole } from '../auth/auth.types';
+import type { AuthUser, UserRole } from '../auth/auth.types';
 import { UsersService } from './users.service';
 
 type CreateUserRequest = {
@@ -41,7 +42,7 @@ export class UsersController {
     private readonly jwtService: JwtService,
   ) {}
 
-  private async resolveActorPermissions(authorization?: string): Promise<string[]> {
+  private async resolveActor(authorization?: string): Promise<AuthUser> {
     const token = authorization?.replace(/^Bearer\s+/i, '').trim();
 
     if (!token) {
@@ -59,49 +60,87 @@ export class UsersController {
         throw new UnauthorizedException('User not found');
       }
 
-      return actor.permissions;
+      return actor;
     } catch {
       throw new UnauthorizedException('Invalid access token');
     }
   }
 
+  private ensurePermission(actor: AuthUser, permission: string) {
+    if (!actor.permissions.includes(permission)) {
+      throw new ForbiddenException(`Missing required permission: ${permission}`);
+    }
+  }
+
   @Get()
-  listUsers(): Promise<UserResponse[]> {
+  async listUsers(
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse[]> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.view');
     return this.usersService.listUsers();
   }
 
   @Get(':userId')
-  getUserById(@Param('userId') userId: string): Promise<UserResponse> {
+  async getUserById(
+    @Param('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.view');
     return this.usersService.getUserById(userId);
   }
 
   @Post()
   @HttpCode(201)
-  createUser(@Body() payload: CreateUserRequest): Promise<UserResponse> {
-    return this.usersService.createByAdmin(payload);
+  async createUser(
+    @Body() payload: CreateUserRequest,
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
+    return this.usersService.createByAdmin(payload, actor.id);
   }
 
   @Patch(':userId')
-  updateUser(
+  async updateUser(
     @Param('userId') userId: string,
     @Body() payload: UpdateUserRequest,
+    @Headers('authorization') authorization?: string,
   ): Promise<UserResponse> {
-    return this.usersService.updateByAdmin(userId, payload);
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
+    return this.usersService.updateByAdmin(userId, payload, actor.id);
   }
 
   @Patch(':userId/suspend')
-  suspendUser(@Param('userId') userId: string): Promise<UserResponse> {
-    return this.usersService.setStatus(userId, 'suspended');
+  async suspendUser(
+    @Param('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
+    return this.usersService.setStatus(userId, 'suspended', actor.id);
   }
 
   @Patch(':userId/ban')
-  banUser(@Param('userId') userId: string): Promise<UserResponse> {
-    return this.usersService.setStatus(userId, 'banned');
+  async banUser(
+    @Param('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
+    return this.usersService.setStatus(userId, 'banned', actor.id);
   }
 
   @Patch(':userId/activate')
-  activateUser(@Param('userId') userId: string): Promise<UserResponse> {
-    return this.usersService.setStatus(userId, 'active');
+  async activateUser(
+    @Param('userId') userId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<UserResponse> {
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
+    return this.usersService.setStatus(userId, 'active', actor.id);
   }
 
   @Get(':userId/permissions')
@@ -109,9 +148,10 @@ export class UsersController {
     @Param('userId') userId: string,
     @Headers('authorization') authorization?: string,
   ) {
-    const actorPermissions = await this.resolveActorPermissions(authorization);
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.view');
 
-    return this.usersService.getUserPermissionsForEditor(userId, actorPermissions);
+    return this.usersService.getUserPermissionsForEditor(userId, actor.permissions);
   }
 
   @Put(':userId/permissions')
@@ -120,12 +160,14 @@ export class UsersController {
     @Body() payload: UpdatePermissionsRequest,
     @Headers('authorization') authorization?: string,
   ) {
-    const actorPermissions = await this.resolveActorPermissions(authorization);
+    const actor = await this.resolveActor(authorization);
+    this.ensurePermission(actor, 'users.create');
 
     return this.usersService.updateUserPermissionsByAdmin(
       userId,
       payload.permissions ?? [],
-      actorPermissions,
+      actor.permissions,
+      actor.id,
     );
   }
 }

@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { In, Repository } from 'typeorm';
 import type { AuthUser, UserRole } from '../auth/auth.types';
+import { AuditLog } from '../audit/audit-log.entity';
 import { Permission } from '../permissions/permission.entity';
 import { RolePermission } from '../roles/role-permission.entity';
 import { Role } from '../roles/role.entity';
@@ -63,6 +64,8 @@ export class UsersService implements OnModuleInit {
     private readonly rolePermissionRepo: Repository<RolePermission>,
     @InjectRepository(UserPermission)
     private readonly userPermissionRepo: Repository<UserPermission>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogRepo: Repository<AuditLog>,
   ) {}
 
   async onModuleInit() {
@@ -159,7 +162,7 @@ export class UsersService implements OnModuleInit {
     email: string;
     password: string;
     role?: UserRole;
-  }): Promise<UserListItem> {
+  }, actorUserId?: string): Promise<UserListItem> {
     const existing = await this.findByEmail(data.email);
     if (existing) {
       throw new ConflictException('Email already in use');
@@ -185,7 +188,15 @@ export class UsersService implements OnModuleInit {
       }),
     );
 
-    return this.getUserById(user.id);
+    const createdUser = await this.getUserById(user.id);
+
+    await this.writeAuditLog('users.create', actorUserId ?? null, {
+      targetUserId: createdUser.id,
+      email: createdUser.email,
+      role: createdUser.role,
+    });
+
+    return createdUser;
   }
 
   async updateByAdmin(
@@ -195,6 +206,7 @@ export class UsersService implements OnModuleInit {
       email?: string;
       role?: UserRole;
     },
+    actorUserId?: string,
   ): Promise<UserListItem> {
     const user = await this.findById(userId);
     if (!user) {
@@ -223,12 +235,21 @@ export class UsersService implements OnModuleInit {
     }
 
     await this.userRepo.save(user);
-    return this.getUserById(user.id);
+    const updated = await this.getUserById(user.id);
+
+    await this.writeAuditLog('users.update', actorUserId ?? null, {
+      targetUserId: updated.id,
+      email: updated.email,
+      role: updated.role,
+    });
+
+    return updated;
   }
 
   async setStatus(
     userId: string,
     status: 'active' | 'suspended' | 'banned',
+    actorUserId?: string,
   ): Promise<UserListItem> {
     const user = await this.findById(userId);
     if (!user) {
@@ -237,7 +258,14 @@ export class UsersService implements OnModuleInit {
 
     user.status = status;
     await this.userRepo.save(user);
-    return this.getUserById(user.id);
+    const updated = await this.getUserById(user.id);
+
+    await this.writeAuditLog('users.status', actorUserId ?? null, {
+      targetUserId: updated.id,
+      status: updated.status,
+    });
+
+    return updated;
   }
 
   async getUserPermissionsForEditor(
@@ -298,6 +326,7 @@ export class UsersService implements OnModuleInit {
     userId: string,
     permissionKeys: string[],
     actorPermissions: string[],
+    actorUserId?: string,
   ): Promise<UserPermissionsEditorData> {
     const user = await this.findById(userId);
     if (!user) {
@@ -336,7 +365,15 @@ export class UsersService implements OnModuleInit {
       );
     }
 
-    return this.getUserPermissionsForEditor(userId, actorPermissions);
+    const editorData = await this.getUserPermissionsForEditor(userId, actorPermissions);
+
+    await this.writeAuditLog('users.permissions.update', actorUserId ?? null, {
+      targetUserId: userId,
+      directPermissions: editorData.directPermissions,
+      effectivePermissions: editorData.effectivePermissions,
+    });
+
+    return editorData;
   }
 
   async getAuthPrincipalByEmail(email: string): Promise<{
@@ -505,5 +542,21 @@ export class UsersService implements OnModuleInit {
         );
       }
     }
+  }
+
+  private async writeAuditLog(
+    action: string,
+    actorUserId: string | null,
+    metadata: Record<string, unknown>,
+  ) {
+    await this.auditLogRepo.save(
+      this.auditLogRepo.create({
+        userId: actorUserId,
+        action,
+        entityType: 'users',
+        entityId: (metadata.targetUserId as string | undefined) ?? null,
+        metadata,
+      }),
+    );
   }
 }

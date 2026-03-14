@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditLog } from '../audit/audit-log.entity';
 import { Permission } from '../permissions/permission.entity';
 import { RolePermission } from '../roles/role-permission.entity';
 import { Role } from '../roles/role.entity';
@@ -14,7 +15,14 @@ import { UsersService } from './users.service';
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'dev_jwt_secret',
     }),
-    TypeOrmModule.forFeature([User, Role, Permission, RolePermission, UserPermission]),
+    TypeOrmModule.forFeature([
+      User,
+      Role,
+      Permission,
+      RolePermission,
+      UserPermission,
+      AuditLog,
+    ]),
   ],
   controllers: [UsersController],
   providers: [UsersService],
