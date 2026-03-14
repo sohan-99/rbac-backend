@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
@@ -9,6 +14,17 @@ import { Role } from '../roles/role.entity';
 import { User } from './user.entity';
 import { demoUserSeeds, permissionSeeds, rolePermissionMap, roleSeeds } from './rbac.seed';
 import { UserPermission } from './user-permission.entity';
+
+export type UserListItem = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  status: 'active' | 'suspended' | 'banned';
+  permissions: string[];
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 @Injectable()
 export class UsersService implements OnModuleInit {
@@ -63,14 +79,147 @@ export class UsersService implements OnModuleInit {
       roleId: customerRole.id,
       role: 'customer',
       permissions: [],
+      status: 'active',
     });
 
     return this.userRepo.save(user);
   }
 
+  async listUsers(): Promise<UserListItem[]> {
+    const users = await this.userRepo.find({
+      relations: { roleRecord: true },
+      order: { createdAt: 'DESC' },
+    });
+
+    const hydrated = await Promise.all(
+      users.map(async (user) => {
+        const authUser = await this.buildAuthUser(user);
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: authUser.role,
+          status: user.status,
+          permissions: authUser.permissions,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        } satisfies UserListItem;
+      }),
+    );
+
+    return hydrated;
+  }
+
+  async getUserById(userId: string): Promise<UserListItem> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const authUser = await this.buildAuthUser(user);
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: authUser.role,
+      status: user.status,
+      permissions: authUser.permissions,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  async createByAdmin(data: {
+    name: string;
+    email: string;
+    password: string;
+    role?: UserRole;
+  }): Promise<UserListItem> {
+    const existing = await this.findByEmail(data.email);
+    if (existing) {
+      throw new ConflictException('Email already in use');
+    }
+
+    const roleSlug = data.role ?? 'customer';
+    const roleRecord = await this.roleRepo.findOne({ where: { slug: roleSlug } });
+
+    if (!roleRecord) {
+      throw new NotFoundException('Role not found');
+    }
+
+    const hashed = await bcrypt.hash(data.password, 10);
+    const user = await this.userRepo.save(
+      this.userRepo.create({
+        name: data.name,
+        email: data.email.toLowerCase(),
+        password: hashed,
+        roleId: roleRecord.id,
+        role: roleSlug,
+        permissions: [],
+        status: 'active',
+      }),
+    );
+
+    return this.getUserById(user.id);
+  }
+
+  async updateByAdmin(
+    userId: string,
+    data: {
+      name?: string;
+      email?: string;
+      role?: UserRole;
+    },
+  ): Promise<UserListItem> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (data.email && data.email.toLowerCase() !== user.email.toLowerCase()) {
+      const existing = await this.findByEmail(data.email);
+      if (existing && existing.id !== user.id) {
+        throw new ConflictException('Email already in use');
+      }
+      user.email = data.email.toLowerCase();
+    }
+
+    if (data.name) {
+      user.name = data.name;
+    }
+
+    if (data.role) {
+      const roleRecord = await this.roleRepo.findOne({ where: { slug: data.role } });
+      if (!roleRecord) {
+        throw new NotFoundException('Role not found');
+      }
+      user.role = data.role;
+      user.roleId = roleRecord.id;
+    }
+
+    await this.userRepo.save(user);
+    return this.getUserById(user.id);
+  }
+
+  async setStatus(
+    userId: string,
+    status: 'active' | 'suspended' | 'banned',
+  ): Promise<UserListItem> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.status = status;
+    await this.userRepo.save(user);
+    return this.getUserById(user.id);
+  }
+
   async getAuthPrincipalByEmail(email: string): Promise<{
     authUser: AuthUser;
     passwordHash: string;
+    status: 'active' | 'suspended' | 'banned';
   } | null> {
     const user = await this.findByEmail(email);
     if (!user) {
@@ -78,7 +227,7 @@ export class UsersService implements OnModuleInit {
     }
 
     const authUser = await this.buildAuthUser(user);
-    return { authUser, passwordHash: user.password };
+    return { authUser, passwordHash: user.password, status: user.status };
   }
 
   async getAuthUserById(id: string): Promise<AuthUser | null> {
@@ -223,6 +372,7 @@ export class UsersService implements OnModuleInit {
           roleId: role.id,
           role: role.slug as UserRole,
           permissions: [],
+          status: 'active',
         }),
       );
     }

@@ -10,6 +10,8 @@ import {
 import type { UserRole } from '../auth/auth.types';
 import { Role } from '../roles/role.entity';
 
+export type UserStatus = 'active' | 'suspended' | 'banned';
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -32,6 +34,9 @@ export class User {
 
   @Column('text', { array: true, default: '{}' })
   permissions!: string[];
+
+  @Column({ default: 'active' })
+  status!: UserStatus;
 
   @ManyToOne(() => Role, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'roleId' })

@@ -55,6 +55,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (principal.status !== 'active') {
+      throw new UnauthorizedException('User account is not active');
+    }
+
     const passwordValid = await this.usersService.validatePassword(
       payload.password,
       principal.passwordHash,
