@@ -16,6 +16,20 @@ import type { LoginRequest, SignupRequest } from './auth.types';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  private getClientIp(request: Request) {
+    const forwardedFor = request.headers['x-forwarded-for'];
+
+    if (typeof forwardedFor === 'string' && forwardedFor.length > 0) {
+      return forwardedFor.split(',')[0]?.trim() ?? request.ip;
+    }
+
+    if (Array.isArray(forwardedFor) && forwardedFor.length > 0) {
+      return forwardedFor[0] ?? request.ip;
+    }
+
+    return request.ip;
+  }
+
   private setRefreshCookie(response: Response, refreshToken: string) {
     response.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -30,9 +44,10 @@ export class AuthController {
   @HttpCode(201)
   async signup(
     @Body() payload: SignupRequest,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const result = await this.authService.signup(payload);
+    const result = await this.authService.signup(payload, this.getClientIp(request));
     this.setRefreshCookie(response, result.refreshToken);
     return result.response;
   }
@@ -41,9 +56,10 @@ export class AuthController {
   @HttpCode(200)
   async login(
     @Body() payload: LoginRequest,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const result = await this.authService.login(payload);
+    const result = await this.authService.login(payload, this.getClientIp(request));
     this.setRefreshCookie(response, result.refreshToken);
     return result.response;
   }
@@ -62,14 +78,26 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) response: Response) {
+  logout(
+    @Req() request: Request,
+    @Headers('authorization') authorization?: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const accessToken = authorization?.replace(/^Bearer\s+/i, '').trim() ?? '';
+    const refreshToken = request.cookies?.refreshToken ?? '';
+
     response.clearCookie('refreshToken', {
       httpOnly: true,
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
       path: '/',
     });
-    return this.authService.logout();
+
+    return this.authService.logout(
+      refreshToken,
+      accessToken,
+      this.getClientIp(request),
+    );
   }
 
   @Get('me')

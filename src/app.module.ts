@@ -3,7 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLog } from './audit/audit-log.entity';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { RevokedToken } from './auth/revoked-token.entity';
 import { Permission } from './permissions/permission.entity';
 import { RolePermission } from './roles/role-permission.entity';
 import { Role } from './roles/role.entity';
@@ -20,11 +22,20 @@ import { UsersModule } from './users/users.module';
       username: process.env.DB_USER ?? 'postgres',
       password: process.env.DB_PASSWORD ?? 'postgres',
       database: process.env.DB_NAME ?? 'rbac_db',
-      entities: [User, Role, Permission, RolePermission, UserPermission, AuditLog],
+      entities: [
+        User,
+        Role,
+        Permission,
+        RolePermission,
+        UserPermission,
+        AuditLog,
+        RevokedToken,
+      ],
       synchronize: true,
     }),
     UsersModule,
     AuthModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [AppService],
