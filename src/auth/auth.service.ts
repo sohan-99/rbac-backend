@@ -19,19 +19,17 @@ export class AuthService {
   async signup(
     payload: SignupRequest,
   ): Promise<{ response: AuthResponse; refreshToken: string }> {
-    const user = await this.usersService.create({
+    const createdUser = await this.usersService.create({
       name: payload.name,
       email: payload.email,
       password: payload.password,
     });
 
-    const authUser: AuthUser = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      permissions: user.permissions,
-    };
+    const authUser = await this.usersService.getAuthUserById(createdUser.id);
+
+    if (!authUser) {
+      throw new UnauthorizedException('User not found');
+    }
 
     const { accessToken, refreshToken } = await this.issueTokens(authUser);
 
@@ -51,28 +49,22 @@ export class AuthService {
   async login(
     payload: LoginRequest,
   ): Promise<{ response: AuthResponse; refreshToken: string }> {
-    const dbUser = await this.usersService.findByEmail(payload.email);
+    const principal = await this.usersService.getAuthPrincipalByEmail(payload.email);
 
-    if (!dbUser) {
+    if (!principal) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
     const passwordValid = await this.usersService.validatePassword(
       payload.password,
-      dbUser.password,
+      principal.passwordHash,
     );
 
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const user: AuthUser = {
-      id: dbUser.id,
-      name: dbUser.name,
-      email: dbUser.email,
-      role: dbUser.role,
-      permissions: dbUser.permissions,
-    };
+    const user = principal.authUser;
 
     const { accessToken, refreshToken } = await this.issueTokens(user);
 
@@ -98,19 +90,11 @@ export class AuthService {
     }
 
     const decoded = await this.verifyRefreshToken(refreshToken);
-    const dbUser = await this.usersService.findById(decoded.sub);
+    const authUser = await this.usersService.getAuthUserById(decoded.sub);
 
-    if (!dbUser) {
+    if (!authUser) {
       throw new UnauthorizedException('User not found');
     }
-
-    const authUser: AuthUser = {
-      id: dbUser.id,
-      name: dbUser.name,
-      email: dbUser.email,
-      role: dbUser.role,
-      permissions: dbUser.permissions,
-    };
 
     const tokens = await this.issueTokens(authUser);
 
@@ -139,21 +123,15 @@ export class AuthService {
     }
 
     const userId = await this.resolveUserIdFromToken(accessToken);
-    const dbUser = await this.usersService.findById(userId);
+    const authUser = await this.usersService.getAuthUserById(userId);
 
-    if (!dbUser) {
+    if (!authUser) {
       throw new UnauthorizedException('User not found');
     }
 
     return {
       success: true,
-      data: {
-        id: dbUser.id,
-        name: dbUser.name,
-        email: dbUser.email,
-        role: dbUser.role,
-        permissions: dbUser.permissions,
-      } as AuthUser,
+      data: authUser,
     };
   }
 
