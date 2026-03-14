@@ -475,29 +475,35 @@ export class UsersService implements OnModuleInit {
 
   private async seedDemoUsers() {
     for (const demoUser of demoUserSeeds) {
-      const existing = await this.findByEmail(demoUser.email);
-      if (existing) {
-        continue;
-      }
-
       const role = await this.roleRepo.findOne({ where: { slug: demoUser.roleSlug } });
       if (!role) {
         continue;
       }
 
       const password = await bcrypt.hash(demoUser.password, 10);
+      const existing = await this.findByEmail(demoUser.email);
 
-      await this.userRepo.save(
-        this.userRepo.create({
+      if (existing) {
+        await this.userRepo.update(existing.id, {
           name: demoUser.name,
-          email: demoUser.email,
           password,
           roleId: role.id,
           role: role.slug as UserRole,
-          permissions: [],
           status: 'active',
-        }),
-      );
+        });
+      } else {
+        await this.userRepo.save(
+          this.userRepo.create({
+            name: demoUser.name,
+            email: demoUser.email,
+            password,
+            roleId: role.id,
+            role: role.slug as UserRole,
+            permissions: [],
+            status: 'active',
+          }),
+        );
+      }
     }
   }
 }

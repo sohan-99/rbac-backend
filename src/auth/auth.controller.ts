@@ -80,8 +80,8 @@ export class AuthController {
   @HttpCode(200)
   logout(
     @Req() request: Request,
-    @Headers('authorization') authorization?: string,
     @Res({ passthrough: true }) response: Response,
+    @Headers('authorization') authorization = '',
   ) {
     const accessToken = authorization?.replace(/^Bearer\s+/i, '').trim() ?? '';
     const refreshToken = request.cookies?.refreshToken ?? '';

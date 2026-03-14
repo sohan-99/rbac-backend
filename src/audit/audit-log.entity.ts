@@ -22,13 +22,13 @@ export class AuditLog {
   @Column({ length: 120 })
   entityType!: string;
 
-  @Column({ length: 120, nullable: true })
+  @Column('varchar', { length: 120, nullable: true })
   entityId!: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
   metadata!: Record<string, unknown> | null;
 
-  @Column({ length: 64, nullable: true })
+  @Column('varchar', { length: 64, nullable: true })
   ipAddress!: string | null;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })

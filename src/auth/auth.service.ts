@@ -1,6 +1,7 @@
 import {
+  HttpException,
+  HttpStatus,
   Injectable,
-  TooManyRequestsException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -309,8 +310,9 @@ export class AuthService {
     const now = Date.now();
 
     if (current.blockedUntil > now) {
-      throw new TooManyRequestsException(
+      throw new HttpException(
         'Too many failed login attempts. Try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
@@ -337,8 +339,9 @@ export class AuthService {
     if (current.count >= this.maxFailedAttempts) {
       current.blockedUntil = now + this.blockDurationMs;
       this.loginAttempts.set(key, current);
-      throw new TooManyRequestsException(
+      throw new HttpException(
         'Too many failed login attempts. Try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
