@@ -2,34 +2,44 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import type { UserRole } from '../auth/auth.types';
+import { Role } from '../roles/role.entity';
 
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ length: 100 })
-  name: string;
+  name!: string;
 
   @Column({ unique: true, length: 200 })
-  email: string;
+  email!: string;
 
   @Column()
-  password: string;
+  password!: string;
+
+  @Column('uuid', { nullable: true })
+  roleId!: string | null;
 
   @Column({ default: 'customer' })
-  role: UserRole;
+  role!: UserRole;
 
   @Column('text', { array: true, default: '{}' })
-  permissions: string[];
+  permissions!: string[];
+
+  @ManyToOne(() => Role, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'roleId' })
+  roleRecord!: Role | null;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
