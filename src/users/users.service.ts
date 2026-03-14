@@ -1,12 +1,13 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { AuthUser, UserRole } from '../auth/auth.types';
 import { Permission } from '../permissions/permission.entity';
 import { RolePermission } from '../roles/role-permission.entity';
@@ -24,6 +25,29 @@ export type UserListItem = {
   permissions: string[];
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type PermissionEditorItem = {
+  key: string;
+  name: string;
+  granted: boolean;
+  inherited: boolean;
+  grantable: boolean;
+};
+
+export type UserPermissionsEditorData = {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    status: 'active' | 'suspended' | 'banned';
+  };
+  directPermissions: string[];
+  rolePermissions: string[];
+  effectivePermissions: string[];
+  grantablePermissions: string[];
+  permissions: PermissionEditorItem[];
 };
 
 @Injectable()
@@ -214,6 +238,105 @@ export class UsersService implements OnModuleInit {
     user.status = status;
     await this.userRepo.save(user);
     return this.getUserById(user.id);
+  }
+
+  async getUserPermissionsForEditor(
+    userId: string,
+    actorPermissions: string[],
+  ): Promise<UserPermissionsEditorData> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const allPermissions = await this.permissionRepo.find({
+      order: { name: 'ASC' },
+    });
+
+    const rolePermissions = user.roleId
+      ? (
+          await this.rolePermissionRepo.find({
+            where: { roleId: user.roleId },
+            relations: { permission: true },
+          })
+        ).map((item) => item.permission.key)
+      : [];
+
+    const directPermissions = (
+      await this.userPermissionRepo.find({
+        where: { userId: user.id },
+        relations: { permission: true },
+      })
+    ).map((item) => item.permission.key);
+
+    const effectivePermissions = [...new Set([...rolePermissions, ...directPermissions])];
+    const grantablePermissions = [...new Set(actorPermissions)];
+
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: (user.roleRecord?.slug ?? user.role) as UserRole,
+        status: user.status,
+      },
+      directPermissions,
+      rolePermissions,
+      effectivePermissions,
+      grantablePermissions,
+      permissions: allPermissions.map((permission) => ({
+        key: permission.key,
+        name: permission.name,
+        granted: effectivePermissions.includes(permission.key),
+        inherited: rolePermissions.includes(permission.key),
+        grantable: grantablePermissions.includes(permission.key),
+      })),
+    };
+  }
+
+  async updateUserPermissionsByAdmin(
+    userId: string,
+    permissionKeys: string[],
+    actorPermissions: string[],
+  ): Promise<UserPermissionsEditorData> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const uniqueKeys = [...new Set(permissionKeys)];
+
+    const invalidGrants = uniqueKeys.filter(
+      (permissionKey) => !actorPermissions.includes(permissionKey),
+    );
+    if (invalidGrants.length > 0) {
+      throw new ForbiddenException(
+        `Grant ceiling exceeded. You cannot grant: ${invalidGrants.join(', ')}`,
+      );
+    }
+
+    const existingPermissions = uniqueKeys.length
+      ? await this.permissionRepo.find({ where: { key: In(uniqueKeys) } })
+      : [];
+
+    if (existingPermissions.length !== uniqueKeys.length) {
+      throw new NotFoundException('One or more permissions do not exist');
+    }
+
+    await this.userPermissionRepo.delete({ userId });
+
+    if (existingPermissions.length > 0) {
+      await this.userPermissionRepo.save(
+        existingPermissions.map((permission) =>
+          this.userPermissionRepo.create({
+            userId,
+            permissionId: permission.id,
+          }),
+        ),
+      );
+    }
+
+    return this.getUserPermissionsForEditor(userId, actorPermissions);
   }
 
   async getAuthPrincipalByEmail(email: string): Promise<{
